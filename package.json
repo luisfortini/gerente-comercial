@@ -1,0 +1,16 @@
+{
+  "name": "gerente-comercial-ia",
+  "private": true,
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c cyan,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "test": "npm run test -w backend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "db:generate": "npm run prisma:generate -w backend",
+    "db:migrate": "npm run prisma:migrate -w backend",
+    "db:seed": "npm run prisma:seed -w backend"
+  },
+  "devDependencies": { "concurrently": "^9.1.2" }
+}
+

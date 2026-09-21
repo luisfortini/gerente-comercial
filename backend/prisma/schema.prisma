@@ -1,0 +1,247 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+model PlanoAgenda {
+  id String @id @default(cuid())
+  usuarioId String @map("usuario_id")
+  destino String
+  vendedorId String @map("vendedor_id")
+  estado String @default("PREVIA")
+  dados Json
+  resultado Json?
+  criadoEm DateTime @default(now()) @map("criado_em")
+  @@index([destino, vendedorId, estado])
+  @@map("planos_agenda")
+}
+
+model AcaoAgenda {
+  id String @id
+  usuarioId String @map("usuario_id")
+  destino String
+  vendedorId String @map("vendedor_id")
+  operacao String
+  estado String
+  dados Json
+  resultado Json?
+  criadoEm DateTime @default(now()) @map("criado_em")
+  @@index([destino, vendedorId, estado])
+  @@map("acoes_agenda")
+}
+
+model AtendimentoAgenda {
+  id String @id
+  usuarioId String @map("usuario_id")
+  destino String
+  vendedorId String @map("vendedor_id")
+  agendaCodigo Int @map("agenda_codigo")
+  agendaVersao String @map("agenda_versao")
+  estado String
+  dados Json
+  resultado Json?
+  criadoEm DateTime @default(now()) @map("criado_em")
+  @@index([destino, vendedorId, agendaCodigo, estado])
+  @@map("atendimentos_agenda")
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FormatoAuthorization {
+  PURO
+  BEARER
+}
+enum Prioridade {
+  BAIXA
+  MEDIA
+  ALTA
+}
+enum StatusOportunidade {
+  NOVA
+  EM_ANALISE
+  ENCAMINHADA
+  CONTATO_REALIZADO
+  VENDA_REALIZADA
+  SEM_INTERESSE
+  DESCARTADA
+}
+enum TipoOportunidade {
+  RECOMPRA_CLIENTE
+  RECOMPRA_PRODUTO
+  CLIENTE_EM_QUEDA
+}
+enum StatusSincronizacao {
+  EM_ANDAMENTO
+  CONCLUIDA
+  PARCIAL
+  FALHA
+}
+
+model Usuario {
+  id String @id @default(cuid())
+  nome String @map("nome")
+  email String @unique @map("email")
+  senhaHash String @map("senha_hash")
+  ativo Boolean @default(true)
+  criadoEm DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+  configuracao ConfiguracaoSirius?
+  @@map("usuarios")
+}
+
+model ConfiguracaoSirius {
+  id String @id @default(cuid())
+  usuarioId String @unique @map("usuario_id")
+  urlBase String @map("url_base")
+  filialCodigo Int @map("filial_codigo")
+  loginSirius String @map("login_sirius")
+  sistemaCodigo Int? @map("sistema_codigo")
+  sistemaVersao String? @map("sistema_versao")
+  subSistemaCodigo Int? @map("subsistema_codigo")
+  subSistemaVersao String? @map("subsistema_versao")
+  formatoAuthorization FormatoAuthorization @default(PURO) @map("formato_authorization")
+  conectadoEm DateTime? @map("conectado_em")
+  ultimoStatus String? @map("ultimo_status")
+  criadoEm DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  @@map("configuracoes_sirius")
+}
+
+model Vendedor {
+  id String @id @default(cuid())
+  codigoExterno Int @map("codigo_externo")
+  nome String
+  email String?
+  telefone String?
+  filialCodigo Int @map("filial_codigo")
+  ativo Boolean @default(true)
+  dadosOriginaisJson Json? @map("dados_originais_json")
+  sincronizadoEm DateTime @default(now()) @map("sincronizado_em")
+  clientes Cliente[]
+  vendas Venda[]
+  oportunidades OportunidadeComercial[]
+  @@unique([codigoExterno, filialCodigo])
+  @@index([nome])
+  @@map("vendedores")
+}
+
+model Cliente {
+  id String @id @default(cuid())
+  codigoExterno Int @map("codigo_externo")
+  razaoSocial String? @map("razao_social")
+  nomeFantasia String? @map("nome_fantasia")
+  vendedorId String? @map("vendedor_id")
+  filialCodigo Int @map("filial_codigo")
+  cidade String?
+  regiao String?
+  atividade String?
+  dadosOriginaisJson Json? @map("dados_originais_json")
+  sincronizadoEm DateTime @default(now()) @map("sincronizado_em")
+  vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
+  vendas Venda[]
+  oportunidades OportunidadeComercial[]
+  @@unique([codigoExterno, filialCodigo])
+  @@index([vendedorId])
+  @@map("clientes")
+}
+
+model Produto {
+  id String @id @default(cuid())
+  codigoExterno Int @unique @map("codigo_externo")
+  descricao String
+  codigoBarras String? @map("codigo_barras")
+  fabricante String?
+  grupo String?
+  categoria String?
+  dadosOriginaisJson Json? @map("dados_originais_json")
+  sincronizadoEm DateTime @default(now()) @map("sincronizado_em")
+  itens ItemVenda[]
+  oportunidades OportunidadeComercial[]
+  @@index([descricao])
+  @@map("produtos")
+}
+
+model Venda {
+  id String @id @default(cuid())
+  chaveExterna String @unique @map("chave_externa")
+  numero String?
+  serie String?
+  naturezaOperacao String? @map("natureza_operacao")
+  dataEmissao DateTime @map("data_emissao")
+  clienteId String @map("cliente_id")
+  vendedorId String? @map("vendedor_id")
+  filialCodigo Int @map("filial_codigo")
+  modoRelatorio Int? @map("modo_relatorio")
+  valorTotal Decimal @db.Decimal(15, 2) @map("valor_total")
+  dadosOriginaisJson Json? @map("dados_originais_json")
+  sincronizadoEm DateTime @default(now()) @map("sincronizado_em")
+  cliente Cliente @relation(fields: [clienteId], references: [id])
+  vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
+  itens ItemVenda[]
+  @@index([dataEmissao])
+  @@index([clienteId, dataEmissao])
+  @@map("vendas")
+}
+
+model ItemVenda {
+  id String @id @default(cuid())
+  vendaId String @map("venda_id")
+  produtoId String @map("produto_id")
+  quantidade Decimal @db.Decimal(15, 4)
+  valorUnitario Decimal @db.Decimal(15, 4) @map("valor_unitario")
+  valorTotal Decimal @db.Decimal(15, 2) @map("valor_total")
+  desconto Decimal? @db.Decimal(15, 2)
+  dadosOriginaisJson Json? @map("dados_originais_json")
+  venda Venda @relation(fields: [vendaId], references: [id], onDelete: Cascade)
+  produto Produto @relation(fields: [produtoId], references: [id])
+  @@unique([vendaId, produtoId])
+  @@map("itens_venda")
+}
+
+model OportunidadeComercial {
+  id String @id @default(cuid())
+  chaveAnalitica String @unique @map("chave_analitica")
+  tipo TipoOportunidade
+  prioridade Prioridade
+  pontuacao Int
+  clienteId String @map("cliente_id")
+  vendedorId String? @map("vendedor_id")
+  produtoId String? @map("produto_id")
+  titulo String
+  explicacao String
+  ultimaCompraEm DateTime? @map("ultima_compra_em")
+  diasSemComprar Int? @map("dias_sem_comprar")
+  intervaloMedioDias Int? @map("intervalo_medio_dias")
+  atrasoDias Int? @map("atraso_dias")
+  quantidadeMedia Decimal? @db.Decimal(15, 4) @map("quantidade_media")
+  quantidadeSugerida Decimal? @db.Decimal(15, 4) @map("quantidade_sugerida")
+  valorPotencial Decimal? @db.Decimal(15, 2) @map("valor_potencial")
+  status StatusOportunidade @default(NOVA)
+  criadaEm DateTime @default(now()) @map("criada_em")
+  atualizadaEm DateTime @updatedAt @map("atualizada_em")
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
+  produto Produto? @relation(fields: [produtoId], references: [id], onDelete: SetNull)
+  @@index([prioridade, status])
+  @@index([vendedorId])
+  @@map("oportunidades_comerciais")
+}
+
+model ExecucaoSincronizacao {
+  id String @id @default(cuid())
+  dataInicial DateTime @map("data_inicial")
+  dataFinal DateTime @map("data_final")
+  filialCodigo Int @map("filial_codigo")
+  vendedorCodigo Int? @map("vendedor_codigo")
+  status StatusSincronizacao
+  registrosRecebidos Int @default(0) @map("registros_recebidos")
+  registrosSalvos Int @default(0) @map("registros_salvos")
+  mensagemErro String? @map("mensagem_erro")
+  iniciadaEm DateTime @default(now()) @map("iniciada_em")
+  finalizadaEm DateTime? @map("finalizada_em")
+  @@index([status, dataInicial])
+  @@map("execucoes_sincronizacao")
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+backend/public/
+*.log
+backend/prisma/dev.db
+.DS_Store
