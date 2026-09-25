@@ -21,23 +21,23 @@ const json = (v: unknown) => v as Prisma.InputJsonValue;
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-export async function sincronizar(usuarioId: string, input: { dataInicial: Date; dataFinal: Date; filial: number; vendedores?: number[]; apenasErros?: boolean }) {
-  const config = await prisma.configuracaoSirius.findUnique({ where: { usuarioId } });
-  const sessao = siriusSessions.get(usuarioId);
+export async function sincronizar(empresaId: string, input: { dataInicial: Date; dataFinal: Date; filial: number; vendedores?: number[]; apenasErros?: boolean }) {
+  const config = await prisma.configuracaoSirius.findUnique({ where: { empresaId } });
+  const sessao = siriusSessions.get(empresaId);
   if (!config || !sessao) throw new AppError(401, 'Reconecte ao Sírius antes de sincronizar');
   const resultadoVendedores = await consultarSirius('vendedores', config, sessao.token);
   for (const raw of (Array.isArray(resultadoVendedores.data) ? resultadoVendedores.data : []) as Record<string, unknown>[]) {
     const codigo = num(raw.colaboradorCodigoVendedor);
     if (!codigo) continue;
-    await prisma.vendedor.upsert({ where: { codigoExterno_filialCodigo: { codigoExterno: codigo, filialCodigo: input.filial } }, update: { nome: String(raw.razaoSocialVendedor || `Vendedor ${codigo}`), email: raw.emailVendedor ? String(raw.emailVendedor) : null, telefone: raw.telefone1Vendedor ? String(raw.telefone1Vendedor) : null, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { codigoExterno: codigo, filialCodigo: input.filial, nome: String(raw.razaoSocialVendedor || `Vendedor ${codigo}`), email: raw.emailVendedor ? String(raw.emailVendedor) : null, telefone: raw.telefone1Vendedor ? String(raw.telefone1Vendedor) : null, dadosOriginaisJson: json(raw) } });
+    await prisma.vendedor.upsert({ where: { empresaId_codigoExterno_filialCodigo: { empresaId, codigoExterno: codigo, filialCodigo: input.filial } }, update: { nome: String(raw.razaoSocialVendedor || `Vendedor ${codigo}`), email: raw.emailVendedor ? String(raw.emailVendedor) : null, telefone: raw.telefone1Vendedor ? String(raw.telefone1Vendedor) : null, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { empresaId, codigoExterno: codigo, filialCodigo: input.filial, nome: String(raw.razaoSocialVendedor || `Vendedor ${codigo}`), email: raw.emailVendedor ? String(raw.emailVendedor) : null, telefone: raw.telefone1Vendedor ? String(raw.telefone1Vendedor) : null, dadosOriginaisJson: json(raw) } });
   }
   const execucoes = [];
   for (const periodo of dividirPorMes(input.dataInicial, input.dataFinal)) {
     if (input.apenasErros) {
-      const falhou = await prisma.execucaoSincronizacao.findFirst({ where: { dataInicial: periodo.inicio, dataFinal: periodo.fim, status: 'FALHA' } });
+      const falhou = await prisma.execucaoSincronizacao.findFirst({ where: { empresaId, dataInicial: periodo.inicio, dataFinal: periodo.fim, status: 'FALHA' } });
       if (!falhou) continue;
     }
-    const execucao = await prisma.execucaoSincronizacao.create({ data: { dataInicial: periodo.inicio, dataFinal: periodo.fim, filialCodigo: input.filial, status: 'EM_ANDAMENTO' } });
+    const execucao = await prisma.execucaoSincronizacao.create({ data: { empresaId, dataInicial: periodo.inicio, dataFinal: periodo.fim, filialCodigo: input.filial, status: 'EM_ANDAMENTO' } });
     try {
       // O modo 0 retorna os pedidos que possuem correspondência integral em vendasproduto.
       // O modo 1 retorna notas sem listaItens e sem chave compatível com esse relatório complementar.
@@ -54,15 +54,15 @@ export async function sincronizar(usuarioId: string, input: { dataInicial: Date;
         if (input.vendedores?.length && !input.vendedores.includes(vendedorCodigo)) continue;
         const clienteCodigo = num(raw.codigoCliente);
         if (!clienteCodigo) continue;
-        const vendedor = vendedorCodigo ? await prisma.vendedor.findUnique({ where: { codigoExterno_filialCodigo: { codigoExterno: vendedorCodigo, filialCodigo: input.filial } } }) : null;
-        const cliente = await prisma.cliente.upsert({ where: { codigoExterno_filialCodigo: { codigoExterno: clienteCodigo, filialCodigo: input.filial } }, update: { razaoSocial: String(raw.razaoCliente || ''), nomeFantasia: String(raw.fantasiaCliente || ''), vendedorId: vendedor?.id, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { codigoExterno: clienteCodigo, filialCodigo: input.filial, razaoSocial: String(raw.razaoCliente || ''), nomeFantasia: String(raw.fantasiaCliente || ''), vendedorId: vendedor?.id, dadosOriginaisJson: json(raw) } });
+        const vendedor = vendedorCodigo ? await prisma.vendedor.findUnique({ where: { empresaId_codigoExterno_filialCodigo: { empresaId, codigoExterno: vendedorCodigo, filialCodigo: input.filial } } }) : null;
+        const cliente = await prisma.cliente.upsert({ where: { empresaId_codigoExterno_filialCodigo: { empresaId, codigoExterno: clienteCodigo, filialCodigo: input.filial } }, update: { razaoSocial: String(raw.razaoCliente || ''), nomeFantasia: String(raw.fantasiaCliente || ''), vendedorId: vendedor?.id, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { empresaId, codigoExterno: clienteCodigo, filialCodigo: input.filial, razaoSocial: String(raw.razaoCliente || ''), nomeFantasia: String(raw.fantasiaCliente || ''), vendedorId: vendedor?.id, dadosOriginaisJson: json(raw) } });
         const numero = String(raw.numero ?? ''); const serie = String(raw.serie ?? ''); const dataEmissao = parseDate(raw.dataEmissao);
         const chaveExterna = `${input.filial}:${serie}:${numero}:${clienteCodigo}`;
-        const venda = await prisma.venda.upsert({ where: { chaveExterna }, update: { dataEmissao, valorTotal: num(raw.valorTotal), clienteId: cliente.id, vendedorId: vendedor?.id, modoRelatorio: 0, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { chaveExterna, numero, serie, naturezaOperacao: String(raw.naturezaOperacao || ''), dataEmissao, clienteId: cliente.id, vendedorId: vendedor?.id, filialCodigo: input.filial, modoRelatorio: 0, valorTotal: num(raw.valorTotal), dadosOriginaisJson: json(raw) } });
+        const venda = await prisma.venda.upsert({ where: { empresaId_chaveExterna: { empresaId, chaveExterna } }, update: { dataEmissao, valorTotal: num(raw.valorTotal), clienteId: cliente.id, vendedorId: vendedor?.id, modoRelatorio: 0, dadosOriginaisJson: json(raw), sincronizadoEm: new Date() }, create: { empresaId, chaveExterna, numero, serie, naturezaOperacao: String(raw.naturezaOperacao || ''), dataEmissao, clienteId: cliente.id, vendedorId: vendedor?.id, filialCodigo: input.filial, modoRelatorio: 0, valorTotal: num(raw.valorTotal), dadosOriginaisJson: json(raw) } });
         const itens = normalizarItensVenda(raw, itensPorVenda, input.filial);
         const produtosSincronizados: string[] = [];
         for (const item of itens) {
-          const produto = await prisma.produto.upsert({ where: { codigoExterno: item.codigo }, update: { descricao: item.descricao, fabricante: item.fabricante, dadosOriginaisJson: json(item.dadosOriginais), sincronizadoEm: new Date() }, create: { codigoExterno: item.codigo, descricao: item.descricao, fabricante: item.fabricante, dadosOriginaisJson: json(item.dadosOriginais) } });
+          const produto = await prisma.produto.upsert({ where: { empresaId_codigoExterno: { empresaId, codigoExterno: item.codigo } }, update: { descricao: item.descricao, fabricante: item.fabricante, dadosOriginaisJson: json(item.dadosOriginais), sincronizadoEm: new Date() }, create: { empresaId, codigoExterno: item.codigo, descricao: item.descricao, fabricante: item.fabricante, dadosOriginaisJson: json(item.dadosOriginais) } });
           produtosSincronizados.push(produto.id);
           const quantidade = item.quantidade; const total = item.valorTotal;
           await prisma.itemVenda.upsert({ where: { vendaId_produtoId: { vendaId: venda.id, produtoId: produto.id } }, update: { quantidade, valorTotal: total, valorUnitario: quantidade ? total / quantidade : total, dadosOriginaisJson: json(item.dadosOriginais) }, create: { vendaId: venda.id, produtoId: produto.id, quantidade, valorTotal: total, valorUnitario: quantidade ? total / quantidade : total, dadosOriginaisJson: json(item.dadosOriginais) } });
@@ -78,12 +78,12 @@ export async function sincronizar(usuarioId: string, input: { dataInicial: Date;
       execucoes.push({ id: execucao.id, status: 'FALHA', erro: mensagem });
     }
   }
-  await recalcularOportunidades();
+  await recalcularOportunidades(empresaId);
   return execucoes;
 }
 
-export async function recalcularOportunidades(hoje = new Date()) {
-  const clientes = await prisma.cliente.findMany({ include: { vendas: { where: { modoRelatorio: 0 }, include: { itens: true }, orderBy: { dataEmissao: 'asc' } } } });
+export async function recalcularOportunidades(empresaId: string, hoje = new Date()) {
+  const clientes = await prisma.cliente.findMany({ where: { empresaId }, include: { vendas: { where: { modoRelatorio: 0 }, include: { itens: true }, orderBy: { dataEmissao: 'asc' } } } });
   const gerador = new GeradorResumoPorTemplate();
   for (const cliente of clientes) {
     const compras = agruparComprasPorDia(cliente.vendas.map(v => ({ data: v.dataEmissao, valor: Number(v.valorTotal) })));
@@ -94,20 +94,20 @@ export async function recalcularOportunidades(hoje = new Date()) {
       const pontos = calcularPrioridade({ atrasoDias: analise.atrasoDias, intervaloTipico: analise.intervaloTipico, compras: compras.length, valorMedio });
       const resumo = await gerador.gerarResumo({ cliente: cliente.nomeFantasia || cliente.razaoSocial || `Cliente ${cliente.codigoExterno}`, analise });
       const data = { tipo: 'RECOMPRA_CLIENTE' as const, prioridade: classificarPrioridade(pontos), pontuacao: pontos, clienteId: cliente.id, vendedorId: cliente.vendedorId, titulo: 'Recompra atrasada', explicacao: resumo.texto, ultimaCompraEm: cliente.vendas.at(-1)?.dataEmissao, diasSemComprar: analise.diasSemComprar, intervaloMedioDias: analise.intervaloTipico, atrasoDias: analise.atrasoDias, valorPotencial: valorMedio };
-      await prisma.oportunidadeComercial.upsert({ where: { chaveAnalitica: chaveCliente }, update: data, create: { chaveAnalitica: chaveCliente, ...data } });
-    } else await prisma.oportunidadeComercial.deleteMany({ where: { chaveAnalitica: chaveCliente, status: 'NOVA' } });
+      await prisma.oportunidadeComercial.upsert({ where: { empresaId_chaveAnalitica: { empresaId, chaveAnalitica: chaveCliente } }, update: data, create: { empresaId, chaveAnalitica: chaveCliente, ...data } });
+    } else await prisma.oportunidadeComercial.deleteMany({ where: { empresaId, chaveAnalitica: chaveCliente, status: 'NOVA' } });
     const porProduto = new Map<string, typeof cliente.vendas>();
     for (const venda of cliente.vendas) for (const item of venda.itens) porProduto.set(item.produtoId, [...(porProduto.get(item.produtoId) ?? []), venda]);
     for (const [produtoId, vendas] of porProduto) {
       const comprasProduto = agruparComprasPorDia(vendas.map(v => { const item = v.itens.find(i => i.produtoId === produtoId)!; return { data: v.dataEmissao, valor: Number(item.valorTotal), quantidade: Number(item.quantidade), precoUnitario: Number(item.valorUnitario) }; }));
       const a = analisarRecompra(comprasProduto, hoje);
       const chaveProduto = `recompra-produto:${cliente.id}:${produtoId}`;
-      if (!a) { await prisma.oportunidadeComercial.deleteMany({ where: { chaveAnalitica: chaveProduto, status: 'NOVA' } }); continue; }
-      const produto = await prisma.produto.findUnique({ where: { id: produtoId } }); if (!produto) continue;
+      if (!a) { await prisma.oportunidadeComercial.deleteMany({ where: { empresaId, chaveAnalitica: chaveProduto, status: 'NOVA' } }); continue; }
+      const produto = await prisma.produto.findFirst({ where: { id: produtoId, empresaId } }); if (!produto) continue;
       const pontos = calcularPrioridade({ atrasoDias: a.atrasoDias, intervaloTipico: a.intervaloTipico, compras: comprasProduto.length, valorMedio: comprasProduto.reduce((s,c)=>s+c.valor,0)/comprasProduto.length, produtoRecorrente: true });
       const resumo = await gerador.gerarResumo({ cliente: cliente.nomeFantasia || cliente.razaoSocial || `Cliente ${cliente.codigoExterno}`, produto: produto.descricao, analise: a });
       const data = { tipo: 'RECOMPRA_PRODUTO' as const, prioridade: classificarPrioridade(pontos), pontuacao: pontos, clienteId: cliente.id, vendedorId: cliente.vendedorId, produtoId, titulo: 'Produto com recompra atrasada', explicacao: resumo.texto, ultimaCompraEm: vendas.at(-1)?.dataEmissao, diasSemComprar: a.diasSemComprar, intervaloMedioDias: a.intervaloTipico, atrasoDias: a.atrasoDias, quantidadeMedia: a.quantidadeSugerida, quantidadeSugerida: a.quantidadeSugerida, valorPotencial: a.valorPotencial };
-      await prisma.oportunidadeComercial.upsert({ where: { chaveAnalitica: chaveProduto }, update: data, create: { chaveAnalitica: chaveProduto, ...data } });
+      await prisma.oportunidadeComercial.upsert({ where: { empresaId_chaveAnalitica: { empresaId, chaveAnalitica: chaveProduto } }, update: data, create: { empresaId, chaveAnalitica: chaveProduto, ...data } });
     }
     const queda = calcularQueda(compras, hoje);
     const chaveQueda = `queda-cliente:${cliente.id}`;
@@ -117,7 +117,7 @@ export async function recalcularOportunidades(hoje = new Date()) {
       const nome = cliente.nomeFantasia || cliente.razaoSocial || `Cliente ${cliente.codigoExterno}`;
       const explicacao = `${nome} faturou ${queda.atual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} nos últimos 90 dias, contra ${queda.anterior.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} nos 90 dias anteriores. A queda calculada é de ${queda.percentual.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%.`;
       const data = { tipo: 'CLIENTE_EM_QUEDA' as const, prioridade: classificarPrioridade(pontos), pontuacao: pontos, clienteId: cliente.id, vendedorId: cliente.vendedorId, titulo: 'Cliente em queda', explicacao, ultimaCompraEm: cliente.vendas.at(-1)?.dataEmissao, valorPotencial: Math.max(0, queda.anterior - queda.atual) };
-      await prisma.oportunidadeComercial.upsert({ where: { chaveAnalitica: chaveQueda }, update: data, create: { chaveAnalitica: chaveQueda, ...data } });
-    } else await prisma.oportunidadeComercial.deleteMany({ where: { chaveAnalitica: chaveQueda, status: 'NOVA' } });
+      await prisma.oportunidadeComercial.upsert({ where: { empresaId_chaveAnalitica: { empresaId, chaveAnalitica: chaveQueda } }, update: data, create: { empresaId, chaveAnalitica: chaveQueda, ...data } });
+    } else await prisma.oportunidadeComercial.deleteMany({ where: { empresaId, chaveAnalitica: chaveQueda, status: 'NOVA' } });
   }
 }

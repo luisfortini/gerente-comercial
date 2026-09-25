@@ -10,14 +10,14 @@ import { diaLocal, hora, instante, minutos, normalizarAgenda, type Ocupacao } fr
 import { alterarManualSchema, corpoAlteracao, excluirManualSchema, horarioEfetivo, incluirManualSchema, lerRegistros, periodoAgenda, validarEncaixeManual, versaoAgenda, type RegistroAgenda } from '../domain/agenda-editor.js';
 
 const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
-export async function visualizarAgenda(usuarioId: string, query: unknown) {
+export async function visualizarAgenda(empresaId: string, query: unknown) {
   const filtro = periodoAgenda.parse(query);
-  const config = await prisma.configuracaoSirius.findUnique({ where: { usuarioId } });
-  const sessao = siriusSessions.get(usuarioId);
+  const config = await prisma.configuracaoSirius.findUnique({ where: { empresaId } });
+  const sessao = siriusSessions.get(empresaId);
   if (!config || !sessao || config.filialCodigo !== sessao.filialCodigo) throw new AppError(401, 'Conecte-se ao Sírius para visualizar a agenda.');
-  const vendedores = await prisma.vendedor.findMany({ where: { filialCodigo: config.filialCodigo, ...(filtro.vendedorId ? { id: filtro.vendedorId } : {}) }, orderBy: { nome: 'asc' } });
+  const vendedores = await prisma.vendedor.findMany({ where: { empresaId, filialCodigo: config.filialCodigo, ...(filtro.vendedorId ? { id: filtro.vendedorId } : {}) }, orderBy: { nome: 'asc' } });
   if (filtro.vendedorId && !vendedores.length) throw new AppError(400, 'Vendedor não pertence à filial conectada.');
-  const clientes = await prisma.cliente.findMany({ where: { filialCodigo: config.filialCodigo }, select: { codigoExterno: true, nomeFantasia: true, razaoSocial: true, cidade: true } });
+  const clientes = await prisma.cliente.findMany({ where: { empresaId, filialCodigo: config.filialCodigo }, select: { codigoExterno: true, nomeFantasia: true, razaoSocial: true, cidade: true } });
   const porCodigo = new Map(clientes.map(c => [c.codigoExterno, c]));
   const eventos: any[] = [], falhas: { vendedorId: string; vendedorNome: string; mensagem: string }[] = [], consultados: string[] = [];
   let proximo = 0;
@@ -44,25 +44,25 @@ type Operacao = 'INCLUIR' | 'ALTERAR' | 'EXCLUIR';
 async function consultar(ctx: Awaited<ReturnType<typeof contexto>>, inicio: string, fim: string) {
   return lerRegistros((await consultarAgendaSirius(ctx.config, ctx.sessao.token, ctx.vendedor.codigoExterno, inicio, fim)).data, ctx.vendedor.codigoExterno);
 }
-async function liberarReservas(tx: Prisma.TransactionClient, destino: string, vendedorId: string, codigoExterno: number, codigo: number, ignorar: string) {
+async function liberarReservas(tx: Prisma.TransactionClient, empresaId: string, destino: string, vendedorId: string, codigoExterno: number, codigo: number, ignorar: string) {
   if (codigoExterno > 0) {
-    const planos = await tx.planoAgenda.findMany({ where: { destino, vendedorId, estado: { in: ['CONCLUIDO', 'INCERTO', 'ENVIANDO'] } } });
+    const planos = await tx.planoAgenda.findMany({ where: { empresaId, destino, vendedorId, estado: { in: ['CONCLUIDO', 'INCERTO', 'ENVIANDO'] } } });
     for (const plano of planos) {
       const dados = plano.dados as any;
       if (dados.itens.some((i: any) => i.codigoExterno === codigoExterno)) await tx.planoAgenda.update({ where: { id: plano.id }, data: { dados: json({ ...dados, liberados: [...new Set([...(dados.liberados || []), codigoExterno])] }) } });
     }
   }
-  const acoes = await tx.acaoAgenda.findMany({ where: { destino, vendedorId, id: { not: ignorar } } });
+  const acoes = await tx.acaoAgenda.findMany({ where: { empresaId, destino, vendedorId, id: { not: ignorar } } });
   for (const acao of acoes) {
     const dados = acao.dados as any, resultado = acao.resultado as any;
     if ((codigoExterno > 0 && dados.codigoExterno === codigoExterno) || resultado?.codigo === codigo) await tx.acaoAgenda.update({ where: { id: acao.id }, data: { dados: json({ ...dados, liberada: true }) } });
   }
 }
 
-export async function executarAcaoAgenda(usuarioId: string, operacao: Operacao, body: unknown) {
+export async function executarAcaoAgenda(usuarioId: string, empresaId: string, operacao: Operacao, body: unknown) {
   const input = operacao === 'INCLUIR' ? incluirManualSchema.parse(body) : operacao === 'ALTERAR' ? alterarManualSchema.parse(body) : excluirManualSchema.parse(body);
   const assinatura = createHash('sha256').update(JSON.stringify({ operacao, input })).digest('hex');
-  const ctx = await contexto(usuarioId, input.vendedorId);
+  const ctx = await contexto(empresaId, input.vendedorId);
   let original: RegistroAgenda | undefined, ocupacao: Ocupacao | undefined, codigoExterno = 0;
   let payload: Record<string, unknown> = {};
   const inicioConsulta = 'diaOriginal' in input ? input.diaOriginal : input.dia;
@@ -73,7 +73,7 @@ export async function executarAcaoAgenda(usuarioId: string, operacao: Operacao, 
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${ctx.destino + '|' + input.vendedorId}))::text`;
     const existente = await tx.acaoAgenda.findUnique({ where: { id: input.chave } });
     if (existente) {
-      if (existente.usuarioId !== usuarioId || (existente.dados as any).assinatura !== assinatura || existente.destino !== ctx.destino) throw new AppError(409, 'A identificação da operação já foi utilizada. Atualize a agenda.');
+      if (existente.usuarioId !== usuarioId || existente.empresaId !== empresaId || (existente.dados as any).assinatura !== assinatura || existente.destino !== ctx.destino) throw new AppError(409, 'A identificação da operação já foi utilizada. Atualize a agenda.');
       return { iniciou: false, registro: existente };
     }
     const registros = await consultar(ctx, inicio, fim);
@@ -82,15 +82,15 @@ export async function executarAcaoAgenda(usuarioId: string, operacao: Operacao, 
       if (!original) throw new AppError(404, 'Agendamento não encontrado na agenda deste vendedor. Atualize a visualização.');
       if (versaoAgenda(original) !== input.versao) throw new AppError(409, 'O agendamento mudou desde a consulta. Atualize a agenda antes de editar ou excluir.');
       codigoExterno = original.codigoExterno;
-      const pendentes = await tx.acaoAgenda.findMany({ where: { destino: ctx.destino, vendedorId: input.vendedorId, estado: { in: ['ENVIANDO', 'INCERTO'] } } });
+      const pendentes = await tx.acaoAgenda.findMany({ where: { empresaId, destino: ctx.destino, vendedorId: input.vendedorId, estado: { in: ['ENVIANDO', 'INCERTO'] } } });
       if (pendentes.some(a => (a.dados as any).codigo === input.codigo)) throw new AppError(409, 'Há uma operação pendente de confirmação para este agendamento. Confira o resultado no Sírius.');
     }
     if ('dia' in input) {
-      const cliente = 'clienteId' in input ? await tx.cliente.findFirst({ where: { id: input.clienteId, vendedorId: input.vendedorId, filialCodigo: ctx.config.filialCodigo } }) : undefined;
+      const cliente = 'clienteId' in input ? await tx.cliente.findFirst({ where: { id: input.clienteId, empresaId, vendedorId: input.vendedorId, filialCodigo: ctx.config.filialCodigo } }) : undefined;
       if ('clienteId' in input && !cliente) throw new AppError(400, 'Selecione um cliente da carteira e filial deste vendedor.');
       ocupacao = { cliente: cliente?.codigoExterno ?? original!.cliente, dia: input.dia, inicio: minutos(input.inicio), fim: minutos(input.fim) };
       const remotos = normalizarAgenda(registros.filter(r => r.codigo !== original?.codigo), ctx.vendedor.codigoExterno);
-      const ocupados = await reservas(tx, ctx.destino, input.vendedorId, remotos, undefined, original?.codigoExterno);
+      const ocupados = await reservas(tx, empresaId, ctx.destino, input.vendedorId, remotos, undefined, original?.codigoExterno);
       const anterior = original ? horarioEfetivo(original) : undefined;
       const mudouHorario = !anterior || anterior.dia !== ocupacao.dia || anterior.inicio !== ocupacao.inicio || anterior.fim !== ocupacao.fim;
       // Atualizar apenas contato/status de um compromisso passado não é uma nova reserva.
@@ -100,7 +100,7 @@ export async function executarAcaoAgenda(usuarioId: string, operacao: Operacao, 
         payload = { cliente: cliente!.codigoExterno, clienteNovo: 0, codigoExterno, vendedor: ctx.vendedor.codigoExterno, dataAgendaLong: instante(input.dia, '00:00'), horaInicioAgenda: input.inicio, horaFimAgenda: input.fim, tipoInteracao: input.tipoInteracao, observacao: input.observacao, sequenciaRota: 0 };
       } else payload = corpoAlteracao(original!, input);
     }
-    const registro = await tx.acaoAgenda.create({ data: { id: input.chave, usuarioId, destino: ctx.destino, vendedorId: input.vendedorId, operacao, estado: 'ENVIANDO', dados: json({ assinatura, codigo: original?.codigo, codigoExterno, ocupacao, original, payload }) } });
+    const registro = await tx.acaoAgenda.create({ data: { id: input.chave, empresaId, usuarioId, destino: ctx.destino, vendedorId: input.vendedorId, operacao, estado: 'ENVIANDO', dados: json({ assinatura, codigo: original?.codigo, codigoExterno, ocupacao, original, payload }) } });
     return { iniciou: true, registro };
   }, { timeout: 150000, maxWait: 10000 });
   if (!acao.iniciou) return acao.registro;
@@ -129,7 +129,7 @@ export async function executarAcaoAgenda(usuarioId: string, operacao: Operacao, 
     }
     return await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${ctx.destino + '|' + input.vendedorId}))::text`;
-      if (original) await liberarReservas(tx, ctx.destino, input.vendedorId, original.codigoExterno, original.codigo, input.chave);
+      if (original) await liberarReservas(tx, empresaId, ctx.destino, input.vendedorId, original.codigoExterno, original.codigo, input.chave);
       return tx.acaoAgenda.update({ where: { id: input.chave }, data: { estado: 'CONCLUIDO', resultado: json({ codigo, mensagem: operacao === 'EXCLUIR' ? 'Agendamento excluído e ausência confirmada no Sírius.' : 'Agendamento salvo e confirmado no Sírius.' }) } });
     }, { timeout: 20000 });
   } catch {

@@ -4,6 +4,7 @@ generator client {
 
 model PlanoAgenda {
   id String @id @default(cuid())
+  empresaId String @map("empresa_id")
   usuarioId String @map("usuario_id")
   destino String
   vendedorId String @map("vendedor_id")
@@ -11,12 +12,15 @@ model PlanoAgenda {
   dados Json
   resultado Json?
   criadoEm DateTime @default(now()) @map("criado_em")
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@index([empresaId, criadoEm])
   @@index([destino, vendedorId, estado])
   @@map("planos_agenda")
 }
 
 model AcaoAgenda {
   id String @id
+  empresaId String @map("empresa_id")
   usuarioId String @map("usuario_id")
   destino String
   vendedorId String @map("vendedor_id")
@@ -25,12 +29,15 @@ model AcaoAgenda {
   dados Json
   resultado Json?
   criadoEm DateTime @default(now()) @map("criado_em")
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@index([empresaId, criadoEm])
   @@index([destino, vendedorId, estado])
   @@map("acoes_agenda")
 }
 
 model AtendimentoAgenda {
   id String @id
+  empresaId String @map("empresa_id")
   usuarioId String @map("usuario_id")
   destino String
   vendedorId String @map("vendedor_id")
@@ -40,6 +47,8 @@ model AtendimentoAgenda {
   dados Json
   resultado Json?
   criadoEm DateTime @default(now()) @map("criado_em")
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@index([empresaId, criadoEm])
   @@index([destino, vendedorId, agendaCodigo, estado])
   @@map("atendimentos_agenda")
 }
@@ -49,9 +58,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ConfiguracaoProduto {
+  id String @id @default("principal")
+  prazoDesenvolvimento String? @map("prazo_desenvolvimento")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+  @@map("configuracao_produto")
+}
+
 enum FormatoAuthorization {
   PURO
   BEARER
+}
+enum PapelEmpresa {
+  ADMIN
 }
 enum Prioridade {
   BAIXA
@@ -87,13 +106,47 @@ model Usuario {
   ativo Boolean @default(true)
   criadoEm DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
-  configuracao ConfiguracaoSirius?
+  empresas UsuarioEmpresa[]
   @@map("usuarios")
+}
+
+model Empresa {
+  id String @id @default(cuid())
+  nome String
+  documento String?
+  ativo Boolean @default(true)
+  criadoEm DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+  usuarios UsuarioEmpresa[]
+  configuracao ConfiguracaoSirius?
+  vendedores Vendedor[]
+  clientes Cliente[]
+  produtos Produto[]
+  vendas Venda[]
+  oportunidades OportunidadeComercial[]
+  sincronizacoes ExecucaoSincronizacao[]
+  planosAgenda PlanoAgenda[]
+  acoesAgenda AcaoAgenda[]
+  atendimentosAgenda AtendimentoAgenda[]
+  @@index([nome])
+  @@map("empresas")
+}
+
+model UsuarioEmpresa {
+  usuarioId String @map("usuario_id")
+  empresaId String @map("empresa_id")
+  papel PapelEmpresa @default(ADMIN)
+  criadoEm DateTime @default(now()) @map("criado_em")
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@id([usuarioId, empresaId])
+  @@index([empresaId])
+  @@map("usuarios_empresas")
 }
 
 model ConfiguracaoSirius {
   id String @id @default(cuid())
-  usuarioId String @unique @map("usuario_id")
+  empresaId String @unique @map("empresa_id")
   urlBase String @map("url_base")
   filialCodigo Int @map("filial_codigo")
   loginSirius String @map("login_sirius")
@@ -106,12 +159,13 @@ model ConfiguracaoSirius {
   ultimoStatus String? @map("ultimo_status")
   criadoEm DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
   @@map("configuracoes_sirius")
 }
 
 model Vendedor {
   id String @id @default(cuid())
+  empresaId String @map("empresa_id")
   codigoExterno Int @map("codigo_externo")
   nome String
   email String?
@@ -123,13 +177,15 @@ model Vendedor {
   clientes Cliente[]
   vendas Venda[]
   oportunidades OportunidadeComercial[]
-  @@unique([codigoExterno, filialCodigo])
-  @@index([nome])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@unique([empresaId, codigoExterno, filialCodigo])
+  @@index([empresaId, nome])
   @@map("vendedores")
 }
 
 model Cliente {
   id String @id @default(cuid())
+  empresaId String @map("empresa_id")
   codigoExterno Int @map("codigo_externo")
   razaoSocial String? @map("razao_social")
   nomeFantasia String? @map("nome_fantasia")
@@ -143,14 +199,16 @@ model Cliente {
   vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
   vendas Venda[]
   oportunidades OportunidadeComercial[]
-  @@unique([codigoExterno, filialCodigo])
-  @@index([vendedorId])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@unique([empresaId, codigoExterno, filialCodigo])
+  @@index([empresaId, vendedorId])
   @@map("clientes")
 }
 
 model Produto {
   id String @id @default(cuid())
-  codigoExterno Int @unique @map("codigo_externo")
+  empresaId String @map("empresa_id")
+  codigoExterno Int @map("codigo_externo")
   descricao String
   codigoBarras String? @map("codigo_barras")
   fabricante String?
@@ -160,13 +218,16 @@ model Produto {
   sincronizadoEm DateTime @default(now()) @map("sincronizado_em")
   itens ItemVenda[]
   oportunidades OportunidadeComercial[]
-  @@index([descricao])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@unique([empresaId, codigoExterno])
+  @@index([empresaId, descricao])
   @@map("produtos")
 }
 
 model Venda {
   id String @id @default(cuid())
-  chaveExterna String @unique @map("chave_externa")
+  empresaId String @map("empresa_id")
+  chaveExterna String @map("chave_externa")
   numero String?
   serie String?
   naturezaOperacao String? @map("natureza_operacao")
@@ -181,7 +242,9 @@ model Venda {
   cliente Cliente @relation(fields: [clienteId], references: [id])
   vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
   itens ItemVenda[]
-  @@index([dataEmissao])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@unique([empresaId, chaveExterna])
+  @@index([empresaId, dataEmissao])
   @@index([clienteId, dataEmissao])
   @@map("vendas")
 }
@@ -203,7 +266,8 @@ model ItemVenda {
 
 model OportunidadeComercial {
   id String @id @default(cuid())
-  chaveAnalitica String @unique @map("chave_analitica")
+  empresaId String @map("empresa_id")
+  chaveAnalitica String @map("chave_analitica")
   tipo TipoOportunidade
   prioridade Prioridade
   pontuacao Int
@@ -225,13 +289,16 @@ model OportunidadeComercial {
   cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   vendedor Vendedor? @relation(fields: [vendedorId], references: [id], onDelete: SetNull)
   produto Produto? @relation(fields: [produtoId], references: [id], onDelete: SetNull)
-  @@index([prioridade, status])
-  @@index([vendedorId])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@unique([empresaId, chaveAnalitica])
+  @@index([empresaId, prioridade, status])
+  @@index([empresaId, vendedorId])
   @@map("oportunidades_comerciais")
 }
 
 model ExecucaoSincronizacao {
   id String @id @default(cuid())
+  empresaId String @map("empresa_id")
   dataInicial DateTime @map("data_inicial")
   dataFinal DateTime @map("data_final")
   filialCodigo Int @map("filial_codigo")
@@ -242,6 +309,7 @@ model ExecucaoSincronizacao {
   mensagemErro String? @map("mensagem_erro")
   iniciadaEm DateTime @default(now()) @map("iniciada_em")
   finalizadaEm DateTime? @map("finalizada_em")
-  @@index([status, dataInicial])
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  @@index([empresaId, status, dataInicial])
   @@map("execucoes_sincronizacao")
 }

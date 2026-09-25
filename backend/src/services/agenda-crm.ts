@@ -20,39 +20,39 @@ export const atendimentoSchema = z.object({
   codigoOcorrencia: z.number().int().positive(), contato: z.string().trim().min(1).max(200), observacao: z.string().trim().min(3).max(4000),
   tipoInteracao: z.enum(['P', 'R']),
 });
-export async function ocorrenciasCrm(usuarioId: string, vendedorId?: string) {
+export async function ocorrenciasCrm(empresaId: string, vendedorId?: string) {
   let config, sessao;
-  if (vendedorId) ({ config, sessao } = await contexto(usuarioId, vendedorId));
+  if (vendedorId) ({ config, sessao } = await contexto(empresaId, vendedorId));
   else {
-    config = await prisma.configuracaoSirius.findUnique({ where: { usuarioId } });
-    const { siriusSessions } = await import('./sirius-session.js'); sessao = siriusSessions.get(usuarioId);
+    config = await prisma.configuracaoSirius.findUnique({ where: { empresaId } });
+    const { siriusSessions } = await import('./sirius-session.js'); sessao = siriusSessions.get(empresaId);
     if (!config || !sessao || config.filialCodigo !== sessao.filialCodigo) throw new AppError(401, 'Conecte-se ao Sírius para operar a agenda.');
   }
   const resposta = await consultarOcorrenciasTelemarketingSirius(config, sessao.token);
   return validarOcorrencias(resposta.data);
 }
-export async function listarAtendimentosCrm(usuarioId: string, inicio: string, fim: string, vendedorId?: string) {
+export async function listarAtendimentosCrm(empresaId: string, inicio: string, fim: string, vendedorId?: string) {
   diaSchema.parse(inicio); diaSchema.parse(fim);
   if (inicio > fim) throw new AppError(400, 'Período inválido.');
-  const config = await prisma.configuracaoSirius.findUnique({ where: { usuarioId } });
+  const config = await prisma.configuracaoSirius.findUnique({ where: { empresaId } });
   if (!config) throw new AppError(401, 'Conecte-se ao Sírius para operar a agenda.');
   const destino = `${config.urlBase.replace(/\/$/, '')}|${config.filialCodigo}`;
-  const registros = await prisma.atendimentoAgenda.findMany({ where: { usuarioId, destino, ...(vendedorId ? { vendedorId } : {}), criadoEm: { gte: new Date(`${inicio}T00:00:00-03:00`), lte: new Date(`${fim}T23:59:59.999-03:00`) } }, orderBy: { criadoEm: 'desc' } });
+  const registros = await prisma.atendimentoAgenda.findMany({ where: { empresaId, destino, ...(vendedorId ? { vendedorId } : {}), criadoEm: { gte: new Date(`${inicio}T00:00:00-03:00`), lte: new Date(`${fim}T23:59:59.999-03:00`) } }, orderBy: { criadoEm: 'desc' } });
   return registros;
 }
-export async function registrarAtendimentoCrm(usuarioId: string, codigoAgenda: number, body: unknown) {
+export async function registrarAtendimentoCrm(usuarioId: string, empresaId: string, codigoAgenda: number, body: unknown) {
   if (!Number.isInteger(codigoAgenda) || codigoAgenda <= 0) throw new AppError(400, 'Código de agendamento inválido.');
-  const input = atendimentoSchema.parse(body), ctx = await contexto(usuarioId, input.vendedorId);
+  const input = atendimentoSchema.parse(body), ctx = await contexto(empresaId, input.vendedorId);
   const assinatura = createHash('sha256').update(JSON.stringify({ codigoAgenda, input })).digest('hex');
   let payload: any;
   const preparado = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${ctx.destino + '|' + input.vendedorId + '|' + codigoAgenda}))::text`;
     const existente = await tx.atendimentoAgenda.findUnique({ where: { id: input.chave } });
     if (existente) {
-      if (existente.usuarioId !== usuarioId || existente.destino !== ctx.destino || existente.agendaCodigo !== codigoAgenda || (existente.dados as any).assinatura !== assinatura) throw new AppError(409, 'A identificação do atendimento já foi utilizada com outros dados.');
+      if (existente.usuarioId !== usuarioId || existente.empresaId !== empresaId || existente.destino !== ctx.destino || existente.agendaCodigo !== codigoAgenda || (existente.dados as any).assinatura !== assinatura) throw new AppError(409, 'A identificação do atendimento já foi utilizada com outros dados.');
       return { iniciou: false, registro: existente };
     }
-    const outro = await tx.atendimentoAgenda.findFirst({ where: { destino: ctx.destino, vendedorId: input.vendedorId, agendaCodigo: codigoAgenda, estado: { in: ['ENVIANDO', 'CONCLUIDO', 'INCERTO'] } }, orderBy: { criadoEm: 'desc' } });
+    const outro = await tx.atendimentoAgenda.findFirst({ where: { empresaId, destino: ctx.destino, vendedorId: input.vendedorId, agendaCodigo: codigoAgenda, estado: { in: ['ENVIANDO', 'CONCLUIDO', 'INCERTO'] } }, orderBy: { criadoEm: 'desc' } });
     if (outro) throw new AppError(409, 'Este agendamento já possui atendimento registrado ou pendente de confirmação.');
     const [agendaResposta, ocorrenciaResposta] = await Promise.all([
       consultarAgendaSirius(ctx.config, ctx.sessao.token, ctx.vendedor.codigoExterno, input.diaAgenda, input.diaAgenda),
@@ -65,7 +65,7 @@ export async function registrarAtendimentoCrm(usuarioId: string, codigoAgenda: n
     if (!ocorrencia) throw new AppError(400, 'Selecione uma ocorrência válida da tabela atual do Sírius.');
     const efetivo = horarioEfetivo(agenda), agora = new Date();
     payload = { codigoAgenda, codigoOcorrencia: ocorrencia.codigo, contato: input.contato, dataAgenda: agora.getTime(), horaAgenda: new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).format(agora), observacao: input.observacao, tipoInteracao: input.tipoInteracao, usuarioLogado: ctx.config.loginSirius };
-    const registro = await tx.atendimentoAgenda.create({ data: { id: input.chave, usuarioId, destino: ctx.destino, vendedorId: input.vendedorId, agendaCodigo: codigoAgenda, agendaVersao: input.versao, estado: 'ENVIANDO', dados: json({ assinatura, agenda: { cliente: agenda.cliente, dia: efetivo.dia, inicio: efetivo.inicio, fim: efetivo.fim, status: agenda.status }, ocorrencia, payload }) } });
+    const registro = await tx.atendimentoAgenda.create({ data: { id: input.chave, empresaId, usuarioId, destino: ctx.destino, vendedorId: input.vendedorId, agendaCodigo: codigoAgenda, agendaVersao: input.versao, estado: 'ENVIANDO', dados: json({ assinatura, agenda: { cliente: agenda.cliente, dia: efetivo.dia, inicio: efetivo.inicio, fim: efetivo.fim, status: agenda.status }, ocorrencia, payload }) } });
     return { iniciou: true, registro };
   }, { timeout: 150000, maxWait: 10000 });
   if (!preparado.iniciou) return preparado.registro;

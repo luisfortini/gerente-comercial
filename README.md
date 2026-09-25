@@ -18,6 +18,12 @@ Plataforma B2B para sincronizar vendas do Space Sírius, detectar recompras atra
 6. Inicie os dois serviços: `npm run dev`.
 7. Abra `http://localhost:5173` e entre com `ADMIN_EMAIL` e `ADMIN_PASSWORD`.
 
+## Empresas e administradores
+
+O acesso funciona em duas etapas: o administrador informa e-mail e senha e, em seguida, escolhe uma das empresas às quais está vinculado ou cria uma nova. Cada empresa mantém separadamente sua conexão com o Sírius, vendedores, clientes, vendas, oportunidades, sincronizações e agendas.
+
+Dentro de **Administradores**, um administrador pode cadastrar novas contas na empresa atual. Quando o e-mail já pertence a outra empresa, a conta existente é vinculada também à empresa atual e passa a aparecer nas opções do próximo login.
+
 ## Fluxo do MVP
 
 Em **Conexão com o Sírius**, informe URL, login, senha, filial e formato do header. O aviso de HTTP sem TLS é intencional. A senha não é salva; o token fica somente na memória do backend e uma reinicialização exige reconectar.

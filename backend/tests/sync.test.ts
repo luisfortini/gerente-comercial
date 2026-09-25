@@ -9,8 +9,8 @@ describe('sincronização idempotente', () => {
   });
   it('usa upserts e chaves únicas no schema para repetição segura', async () => {
     const schema = await import('node:fs/promises').then(fs => fs.readFile(new URL('../prisma/schema.prisma', import.meta.url), 'utf8'));
-    expect(schema).toContain('@@unique([codigoExterno, filialCodigo])');
-    expect(schema).toContain('chaveExterna String @unique');
+    expect(schema).toContain('@@unique([empresaId, codigoExterno, filialCodigo])');
+    expect(schema).toContain('@@unique([empresaId, chaveExterna])');
     expect(schema).toContain('@@unique([vendaId, produtoId])');
     expect(schema).toContain('onDelete: Cascade');
   });
