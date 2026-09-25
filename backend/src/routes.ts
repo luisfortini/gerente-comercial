@@ -65,6 +65,27 @@ routes.get('/empresa', asyncRoute(async (req, res) => {
   const empresa = await prisma.empresa.findUniqueOrThrow({ where: { id: req.empresaId! }, select: { id: true, nome: true, documento: true, criadoEm: true } });
   res.json({ empresa });
 }));
+routes.delete('/empresa/dados', asyncRoute(async (req, res) => {
+  const { confirmacao } = z.object({ confirmacao: z.string().trim() }).parse(req.body);
+  const empresa = await prisma.empresa.findUnique({ where: { id: req.empresaId! }, select: { nome: true } });
+  if (!empresa) throw new AppError(404, 'Empresa não encontrada');
+  if (confirmacao !== empresa.nome) throw new AppError(400, 'Digite o nome exato da empresa para confirmar');
+
+  const empresaId = req.empresaId!;
+  const resultado = await prisma.$transaction(async tx => {
+    const atendimentos = await tx.atendimentoAgenda.deleteMany({ where: { empresaId } });
+    const acoes = await tx.acaoAgenda.deleteMany({ where: { empresaId } });
+    const planos = await tx.planoAgenda.deleteMany({ where: { empresaId } });
+    const oportunidades = await tx.oportunidadeComercial.deleteMany({ where: { empresaId } });
+    const vendas = await tx.venda.deleteMany({ where: { empresaId } });
+    const produtos = await tx.produto.deleteMany({ where: { empresaId } });
+    const clientes = await tx.cliente.deleteMany({ where: { empresaId } });
+    const vendedores = await tx.vendedor.deleteMany({ where: { empresaId } });
+    const sincronizacoes = await tx.execucaoSincronizacao.deleteMany({ where: { empresaId } });
+    return { atendimentos: atendimentos.count, acoesAgenda: acoes.count, planosAgenda: planos.count, oportunidades: oportunidades.count, vendas: vendas.count, produtos: produtos.count, clientes: clientes.count, vendedores: vendedores.count, sincronizacoes: sincronizacoes.count };
+  });
+  res.json({ mensagem: 'Dados da empresa excluídos com sucesso.', excluidos: resultado });
+}));
 routes.get('/usuarios', asyncRoute(async (req, res) => {
   const vinculos = await prisma.usuarioEmpresa.findMany({ where: { empresaId: req.empresaId! }, include: { usuario: { select: { id: true, nome: true, email: true, ativo: true, criadoEm: true } } }, orderBy: { usuario: { nome: 'asc' } } });
   res.json({ usuarios: vinculos.map(v => ({ ...v.usuario, papel: v.papel })) });
