@@ -47,7 +47,7 @@ export default function Apresentacao({ user }: Props) {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 md:px-8">
         <a href="#inicio" className="flex items-center gap-3"><img src="/brand/space-sistemas.webp" alt="Space Sistemas" className="h-9 w-auto"/><span className="border-l border-white/20 pl-3"><strong className="block leading-tight">Gerente Comercial</strong><span className="text-xs text-white/55">Inteligência de carteira</span></span></a>
         <div className="hidden items-center gap-7 text-sm font-medium md:flex"><a href="#solucao">A solução</a><a href="#analises">Como analisa</a><a href="#participacao">Condições</a></div>
-        <div className="flex items-center gap-2"><button onClick={()=>window.print()} className="screen-only hidden items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-sm font-semibold sm:inline-flex"><Download size={16}/> Gerar PDF</button><Link to="/" className="inline-flex items-center gap-2 rounded-full bg-[#ff7b00] px-4 py-2.5 text-sm font-semibold text-white">{user ? 'Abrir plataforma' : 'Acessar demonstração'}<ArrowRight size={16}/></Link></div>
+        <div className="flex items-center gap-2"><a href="/apresentacao-gerente-comercial.pdf" download="Gerente Comercial IA.pdf" className="screen-only hidden items-center gap-2 rounded-full border border-white/25 px-4 py-2.5 text-sm font-semibold sm:inline-flex"><Download size={16}/> Baixar PDF</a><Link to="/" className="inline-flex items-center gap-2 rounded-full bg-[#ff7b00] px-4 py-2.5 text-sm font-semibold text-white">{user ? 'Abrir plataforma' : 'Acessar demonstração'}<ArrowRight size={16}/></Link></div>
       </div>
     </nav>
 

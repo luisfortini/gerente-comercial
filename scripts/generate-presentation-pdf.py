@@ -1,4 +1,5 @@
 from pathlib import Path
+from shutil import copyfile
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfbase import pdfmetrics
@@ -10,7 +11,9 @@ from reportlab.lib.enums import TA_LEFT
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "output" / "pdf" / "apresentacao-gerente-comercial.pdf"
+PUBLIC_OUTPUT = ROOT / "frontend" / "public" / "apresentacao-gerente-comercial.pdf"
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+PUBLIC_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
 W, H = landscape(A4)
 INK = HexColor("#00236A")
@@ -191,4 +194,5 @@ footer(6, True)
 c.showPage()
 
 c.save()
+copyfile(OUTPUT, PUBLIC_OUTPUT)
 print(OUTPUT)
